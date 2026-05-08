@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 招聘與人才管理系統 | HR Expert Pro</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --primary-dark: #1d4ed8;
+            --primary-gradient: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
+            --radius: 12px;
+            --transition: all 0.3s ease;
+        }
+
+        * { 
+            box-sizing: border-box; 
+            margin: 0;
+            padding: 0;
+        }
+
+        body { 
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; 
+            background: var(--bg); 
+            color: var(--text); 
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        /* Header with gradient */
+        header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 2rem 1rem;
+            text-align: center;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNlZmVlZmUiIGZpbGwtb3BhY2l0eT0iMC4yIj48cGF0aCBkPSJNMzAwIDBoMzAwdjMwMEg2MDB2MzAwSDMwMFYzMDBIMDBWMzAwSDB6Ii8+PC9nPjwvZz48L3N2Zz4=');
+            opacity: 0.1;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            position: relative;
+            z-index: 1;
+        }
+
+        header p {
+            margin-top: 0.5rem;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+
+        .container { 
+            width: 95%; 
+            max-width: 1200px; 
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        /* Tabs with animation */
+        .tabs { 
+            display: flex; 
+            gap: 8px; 
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            border: none;
+            background: #e2e8f0;
+            cursor: pointer;
+            border-radius: var(--radius);
+            font-weight: 600;
+            transition: var(--transition);
+            color: var(--text);
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .tab-btn.active { 
+            background: var(--primary-gradient); 
+            color: white;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+        }
+
+        .tab-btn:hover:not(.active) {
+            background: #cbd5e1;
+            transform: translateY(-2px);
+        }
+
+        /* Sections with card effect */
+        .section { 
+            display: none; 
+            background: var(--card); 
+            padding: 2.5rem; 
+            border-radius: var(--radius); 
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+        }
+
+        .section.active { 
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Form styles */
+        .form-group { 
+            margin-bottom: 2rem; 
+        }
+
+        label { 
+            display: block; 
+            margin-bottom: 0.75rem; 
+            font-weight: 600;
+            color: var(--text);
+            font-size: 1rem;
+        }
+
+        textarea, 
+        input[type="text"],
+        input[type="file"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 1rem;
+            font-family: inherit;
+            transition: var(--transition);
+            background: var(--bg);
+        }
+
+        textarea:focus, 
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            background: var(--bg);
+            border: 1px dashed var(--border);
+        }
+
+        input[type="file"]:hover {
+            border-color: var(--primary-light);
+        }
+
+        /* Buttons with gradient and hover effect */
+        button.main-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 14px 24px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            width: 100%;
+            transition: var(--transition);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        button.main-btn:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+        }
+
+        button.main-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Results Display with enhanced cards */
+        .candidate-card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            margin-top: 2rem;
+            background: #fff;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+        }
+
+        .candidate-card:hover {
+            box-shadow: var(--shadow-hover);
+            transform: translateY(-3px);
+        }
+
+        .badge {
+            padding: 6px 16px;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .badge.high { background: #dcfce7; color: #166534; }
+        .badge.medium { background: #fffbeb; color: #92400e; }
+        .badge.low { background: #fef2f2; color: #991b1b; }
+        .badge.edge { background: #eff6ff; color: #1e40af; }
+
+        .summary-box {
+            background: #f8fafc;
+            border-left: 4px solid var(--primary);
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+            font-style: italic;
+            border-radius: 0 8px 8px 0;
+        }
+
+        /* Score bars */
+        .score-bar-container {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            margin: 0.5rem 0 1rem;
+            overflow: hidden;
+        }
+
+        .score-bar {
+            height: 100%;
+            border-radius: 4px;
+            background: var(--primary-gradient);
+            transition: width 1s ease;
+        }
+
+        /* Chat System enhancement */
+        #chatWindow {
+            height: 450px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            background: #f8fafc;
+            margin-bottom: 1.5rem;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .msg { 
+            margin-bottom: 1.25rem; 
+            padding: 12px 16px; 
+            border-radius: 16px; 
+            max-width: 85%;
+            line-height: 1.5;
+        }
+
+        .msg.user { 
+            background: var(--primary-gradient); 
+            color: white; 
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+
+        .msg.ai { 
+            background: #e2e8f0; 
+            color: var(--text);
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Loading with spinner animation */
+        #loading {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 5px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .section {
+                padding: 1.5rem;
+            }
+
+            .candidate-card {
+                padding: 1.5rem;
+            }
+
+            header h1 {
+                font-size: 1.8rem;
+            }
+
+            #chatWindow {
+                height: 350px;
+            }
+        }
+
+        /* Additional utility classes */
+        .text-sm { font-size: 0.875rem; color: var(--text-light); }
+        .mt-2 { margin-top: 0.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .grid-item {
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+    </style>
+    <!-- Add Google Fonts for better typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+    <h1>AI HR Expert Pro</h1>
+    <p>智能招聘分析 · 離職風險評估 </p>
+</header>
+
+<div id="loading">
+    <div class="spinner"></div>
+    <div style="font-weight: 600; color: var(--primary);">處理中，請稍候...</div>
+</div>
+
+<div class="container">
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(0)">履歷篩選</button>
+        <button class="tab-btn" onclick="switchTab(1)">離職/風險分析</button>
+    </div>
+
+    <div id="section-0" class="section active">
+        <div class="form-group">
+            <label>職位描述 (Job Description)</label>
+            <textarea id="jdInput" rows="6" placeholder="請貼入詳細的職位要求，包括技能、經驗、教育背景、軟技能等..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>上傳履歷 (PDF/TXT)</label>
+            <input type="file" id="fileInput" multiple accept=".pdf,.txt">
+            <p class="text-sm mt-2">支援多檔案批量上傳，單檔最大10MB</p>
+        </div>
+        <button class="main-btn" onclick="screenCvs()">開始智能篩選</button>
+        <div id="resultsContainer"></div>
+    </div>
+
+    <div id="section-1" class="section">
+        <div class="form-group">
+            <label>候選人/員工 ID (如: Alex Chen)</label>
+            <input type="text" id="candidateIdFiring" placeholder="輸入已上傳的 ID">
+        </div>
+        <div class="form-group">
+            <label>具體情況或問題</label>
+            <textarea id="firingQuery" rows="4" placeholder="例如：該員工近期績效不達標，考慮解雇，請分析法律風險和操作建議？"></textarea>
+        </div>
+        <button class="main-btn" onclick="analyzeFiring()">執行風險評估</button>
+        <div id="firingResult" class="candidate-card" style="display:none;"></div>
+    </div>
+
+
+<script>
+    let currentHistory = "";
+
+    function switchTab(index) {
+        document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+            btn.classList.toggle('active', i === index);
+        });
+        document.querySelectorAll('.section').forEach((sec, i) => {
+            sec.classList.toggle('active', i === index);
+        });
+    }
+
+    function showLoading(show) {
+        document.getElementById('loading').style.display = show ? 'flex' : 'none';
+    }
+
+    // --- 功能 1: 增強版履歷篩選 ---
+    async function screenCvs() {
+        const jd = document.getElementById('jdInput').value.trim();
+        const files = document.getElementById('fileInput').files;
+
+        if (!jd) return alert("請填寫詳細的職位描述");
+        if (files.length === 0) return alert("請選擇至少一個履歷檔案");
+
+        const formData = new FormData();
+        formData.append("jd", jd);
+        for (let f of files) formData.append("files", f);
+
+        showLoading(true);
+        const container = document.getElementById('resultsContainer');
+        container.innerHTML = "<div style='text-align:center; padding:2rem;'><div class='spinner' style='margin:0 auto;'></div><p class='mt-2'>正在進行多維度分析與橫向對比...</p></div>";
+
+        try {
+            const res = await fetch("/screen_cvs", { method: "POST", body: formData });
+            
+            if (!res.ok) throw new Error(`HTTP錯誤: ${res.status}`);
+            
+            const batchData = await res.json(); 
+            
+            if (!batchData.results || !Array.isArray(batchData.results)) {
+                throw new Error("AI回傳格式異常，缺少results陣列");
+            }
+
+            renderBatchResults(batchData.results);
+        } catch (e) {
+            alert(`篩選出錯: ${e.message}`);
+            console.error("Screening error:", e);
+            document.getElementById('resultsContainer').innerHTML = `<p style='color:var(--danger); padding:1rem;'>❌ 分析失敗: ${e.message}</p>`;
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    function renderBatchResults(results) {
+        const container = document.getElementById('resultsContainer');
+        container.innerHTML = "<h2 style='margin-bottom:1.5rem; color:var(--text);'>📊 批量履歷篩選結果</h2>";
+
+        if (results.length === 0) {
+            container.innerHTML += "<p style='padding:1rem; color:var(--text-light);'>未找到符合條件的候選人分析結果</p>";
+            return;
+        }
+
+        // Sort by overall_score descending
+        results.sort((a, b) => b.overall_score - a.overall_score);
+
+        results.forEach((cand, index) => {
+            // Map match status to badge class
+            const badgeClass = {
+                "高度符合": "high",
+                "部分符合": "medium",
+                "邊緣符合": "edge",
+                "不符合": "low"
+            }[cand.match_status] || "medium";
+
+            const card = document.createElement('div');
+            card.className = 'candidate-card';
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+                    <h3 style="margin:0;">${index + 1}. ${cand.candidate_name}</h3>
+                    <div style="display:flex; align-items:center; gap:1rem;">
+                        <span style="font-size:1.2rem; font-weight:700; color:var(--primary);">總分: ${cand.overall_score}/100</span>
+                        <span class="badge ${badgeClass}">${cand.match_status}</span>
+                    </div>
+                </div>
+
+                <!-- Multi-dimensional score bars -->
+                <div class="grid">
+                    <div class="grid-item">
+                        <div style="display:flex; justify-content:space-between; font-size:0.9rem;">
+                            <span>核心能力匹配度</span>
+                            <span>${cand.core_competency_match}/100</span>
+                        </div>
+                        <div class="score-bar-container">
+                            <div class="score-bar" style="width: ${cand.core_competency_match}%;"></div>
+                        </div>
+                    </div>
+                    <div class="grid-item">
+                        <div style="display:flex; justify-content:space-between; font-size:0.9rem;">
+                            <span>工作經驗匹配度</span>
+                            <span>${cand.experience_match}/100</span>
+                        </div>
+                        <div class="score-bar-container">
+                            <div class="score-bar" style="width: ${cand.experience_match}%;"></div>
+                        </div>
+                    </div>
+                    <div class="grid-item">
+                        <div style="display:flex; justify-content:space-between; font-size:0.9rem;">
+                            <span>教育背景匹配度</span>
+                            <span>${cand.education_match}/100</span>
+                        </div>
+                        <div class="score-bar-container">
+                            <div class="score-bar" style="width: ${cand.education_match}%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Soft skills analysis -->
+                <div class="mt-2 mb-4">
+                    <h4 style="font-size:1rem; margin-bottom:0.5rem;">軟技能分析</h4>
+                    <p class="text-sm">${cand.soft_skills_analysis || "無相關分析"}</p>
+                </div>
+
+                <!-- Core summary -->
+                <div class="summary-box">
+                    <strong>核心評價：</strong>${cand.summary || "無核心評價"}
+                </div>
+
+                <!-- Detailed analysis -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:1.5rem; margin:1.5rem 0;">
+                    <div>
+                        <h4 style="font-size:1rem; color:var(--success); margin-bottom:0.5rem;">✅ 優勢</h4>
+                        <ul style="padding-left:1.5rem; color:var(--text);">
+                            ${cand.analysis?.優勢?.length 
+                                ? cand.analysis.優勢.map(item => `<li>${item}</li>`).join('') 
+                                : "<li>無明顯優勢</li>"}
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="font-size:1rem; color:var(--warning); margin-bottom:0.5rem;">⚠️ 劣勢</h4>
+                        <ul style="padding-left:1.5rem; color:var(--text);">
+                            ${cand.analysis?.劣勢?.length 
+                                ? cand.analysis.劣勢.map(item => `<li>${item}</li>`).join('') 
+                                : "<li>無明顯劣勢</li>"}
+                        </ul>
+                    </div>
+                </div>
+
+                <div style="margin:1.5rem 0;">
+                    <h4 style="font-size:1rem; margin-bottom:0.5rem;">💡 改進建議</h4>
+                    <ul style="padding-left:1.5rem; color:var(--text);">
+                        ${cand.analysis?.改進建議?.length 
+                            ? cand.analysis.改進建議.map(item => `<li>${item}</li>`).join('') 
+                            : "<li>無改進建議</li>"}
+                    </ul>
+                </div>
+
+                <div style="margin:1.5rem 0;">
+                    <h4 style="font-size:1rem; margin-bottom:0.5rem;">⚠️ 錄用風險</h4>
+                    <ul style="padding-left:1.5rem; color:var(--text);">
+                        ${cand.analysis?.錄用風險?.length 
+                            ? cand.analysis.錄用風險.map(item => `<li>${item}</li>`).join('') 
+                            : "<li>無明顯錄用風險</li>"}
+                    </ul>
+                </div>
+
+                <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border);">
+                    <h4 style="font-size:1rem; margin-bottom:0.5rem;">🎯 面試重點提問</h4>
+                    <ol style="padding-left:1.5rem; color:var(--text);">
+                        ${cand.interview_focus?.length 
+                            ? cand.interview_focus.map(item => `<li>${item}</li>`).join('') 
+                            : "<li>無建議提問方向</li>"}
+                    </ol>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    // --- 功能 2: 增強版離職/解雇分析 ---
+    async function analyzeFiring() {
+        const cid = document.getElementById('candidateIdFiring').value.trim();
+        const query = document.getElementById('firingQuery').value.trim();
+
+        if (!cid) return alert("請輸入候選人/員工 ID");
+        if (!query) return alert("請填寫具體的分析問題");
+
+        showLoading(true);
+        try {
+            const res = await fetch("/firing_analysis", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ 
+                    candidate_id: cid, 
+                    query: query 
+                })
+            });
+
+            if (!res.ok) throw new Error(`HTTP錯誤: ${res.status}`);
+            
+            const data = await res.json();
+            const display = document.getElementById('firingResult');
+            
+            // Render firing analysis
+            display.style.display = 'block';
+            display.innerHTML = `
+                <h3 style="margin-bottom:1rem; color:var(--text);">📋 離職/解雇風險分析結果 (${cid})</h3>
+                
+                <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+                    <span class="badge ${data.risk_level === '高' ? 'low' : data.risk_level === '中' ? 'medium' : 'high'}">
+                        風險等級: ${data.risk_level}
+                    </span>
+                    <span class="badge ${data.legal_compliance === '符合' ? 'high' : 'low'}">
+                        法律合规性: ${data.legal_compliance}
+                    </span>
+                </div>
+
+                <div class="summary-box" style="margin:1.5rem 0;">
+                    <strong>核心結論：</strong>${data.suggestions?.[0] || "基於提供的資訊，未發現明顯風險"}
+                </div>
+
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:1.5rem; margin:1.5rem 0;">
+                    <div>
+                        <h4 style="font-size:1rem; color:var(--danger); margin-bottom:0.5rem;">⚠️ 風險因素</h4>
+                        <ul style="padding-left:1.5rem;">
+                            ${data.risk_factors?.length 
+                                ? data.risk_factors.map(item => `<li>${item}</li>`).join('') 
+                                : "<li>無明顯風險因素</li>"}
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="font-size:1rem; color:var(--warning); margin-bottom:0.5rem;">📜 法律風險</h4>
+                        <ul style="padding-left:1.5rem;">
+                            ${data.legal_risks?.length 
+                                ? data.legal_risks.map(item => `<li>${item}</li>`).join('') 
+                                : "<li>無法律風險</li>"}
+                        </ul>
+                    </div>
+                </div>
+
+                <div style="margin:1.5rem 0;">
+                    <h4 style="font-size:1rem; color:var(--primary); margin-bottom:0.5rem;">💡 處理建議</h4>
+                    <ul style="padding-left:1.5rem;">
+                        ${data.suggestions?.length 
+                            ? data.suggestions.map(item => `<li>${item}</li>`).join('') 
+                            : "<li>無具體建議</li>"}
+                    </ul>
+                </div>
+
+                <div style="margin:1.5rem 0;">
+                    <h4 style="font-size:1rem; color:var(--info); margin-bottom:0.5rem;">🗣️ 溝通策略</h4>
+                    <ul style="padding-left:1.5rem;">
+                        ${data.communication_strategy?.length 
+                            ? data.communication_strategy.map(item => `<li>${item}</li>`).join('') 
+                            : "<li>無具體溝通策略建議</li>"}
+                    </ul>
+                </div>
+            `;
+        } catch (e) {
+            alert(`分析失敗: ${e.message}`);
+            console.error("Firing analysis error:", e);
+        } finally {
+            showLoading(false);
+        }
+    }
+
+</script>
+
+</body>
+</html>
