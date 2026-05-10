@@ -1,34 +1,51 @@
+"""
+main_handler.py
+───────────────
+Legacy single-request handler (kept for backward compatibility).
+For production use, prefer TaskRouter via main_api.py.
+"""
+
 from embedding_mgr import EmbeddingManager
 from model_provider import AIModelProvider
 import os
 import config
+
 
 class MainLogicHandler:
     def __init__(self):
         self.emb_mgr = EmbeddingManager()
         self.ai = AIModelProvider()
 
-    def handle_request(self, request_data):
-        task_type = request_data.get("task")
-        candidate_id = request_data.get("candidate_id")
-        jd_text = request_data.get("jd")
-        file_path = request_data.get("file_path")
+    def handle_request(self, request_data: dict):
+        task_type    = request_data.get("task")
+        candidate_id = request_data.get("candidate_id", "")
+        jd_text      = request_data.get("jd", "")
+        file_path    = request_data.get("file_path", "")
 
         if task_type == "cv_screening":
-            db_path = os.path.join(config.DB_ROOT, candidate_id)
-            
-            # 【Debug 優化】：若資料庫已存在，則跳過 Embedding 步驟以節省時間
-            if not os.path.exists(db_path):
-                print(f"Creating new vector DB for {candidate_id}...")
-                self.emb_mgr.embed_cv(file_path, candidate_id)
-            
-            # 2. 檢索與 JD 最相關的履歷內容
-            db = self.emb_mgr.load_db(candidate_id)
-            docs = db.similarity_search(jd_text, k=4)
-            context = "\n".join([d.page_content for d in docs])
-            print(f"Retrieved context for {candidate_id}:\n{context}\n")
-            
-            # 3. 呼叫 AI 進行推理評分
-            return self.ai.ask_ai(context, jd_text)
-        
-        return "Feature not implemented"
+            if not candidate_id or not jd_text:
+                return {"error": "candidate_id and jd are required for cv_screening"}
+
+            # Embed with version control
+            result = self.emb_mgr.embed_file_with_versioning(
+                file_path,
+                self.emb_mgr.clean_id(candidate_id),
+                config.CV_DB_DIR,
+                "cv",
+            )
+
+            if "error" in result:
+                return {"error": result["error"]}
+
+            db = self.emb_mgr.load_db(result["db_id"], config.CV_DB_DIR)
+            docs = db.similarity_search(jd_text, k=config.CV_RETRIEVAL_K)
+            context = "\n".join(d.page_content for d in docs)
+
+            return self.ai.cv_screening_ai(
+                context,
+                "cv_screening",
+                jd=jd_text,
+                culture_ctx="Not provided",
+            )
+
+        return {"error": f"Unknown task type: {task_type}"}
