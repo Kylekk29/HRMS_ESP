@@ -77,7 +77,6 @@ from embedding_mgr import EmbeddingManager
 from hrms_manager import HRMSManager
 from payroll_manager import PayrollManager
 from development_manager import DevelopmentManager
-from internal_marketplace import InternalMarketplace
 from task_router import TaskRouter
 
 import logging
@@ -98,7 +97,6 @@ router = TaskRouter()
 hrms = HRMSManager()
 payroll = PayrollManager(hrms)
 dev_mgr = DevelopmentManager(hrms, router.emb, ai_provider=router.ai)
-marketplace = InternalMarketplace(hrms, dev_mgr)
 
 _ALLOWED_EXT = {".pdf", ".txt", ".docx"}
 
@@ -837,7 +835,6 @@ async def dashboard():
 
     # Pending approvals
     pending_leave = len(hrms.get_pending_leave_requests())
-    pending_apps = len(marketplace.get_pending_applications())
 
     # Payroll this month (quick estimate from base salaries)
     total_base = sum(
@@ -846,9 +843,6 @@ async def dashboard():
         if e.get("status") == "Active"
     )
     active_count = status_counts["Active"]
-
-    # Active projects
-    active_projects = marketplace.count_active_projects()
 
     return {
         "employee_stats": {
@@ -867,14 +861,12 @@ async def dashboard():
         ),
         "attendance_today": attendance_today,
         "pending_approvals": {
-            "leave_requests": pending_leave,
-            "project_applications": pending_apps,
+            "leave_requests": pending_leave
         },
         "payroll_this_month": {
             "total": total_base,
             "average": int(total_base / active_count) if active_count > 0 else 0,
-        },
-        "active_internal_projects": active_projects,
+        }
     }
 
 
