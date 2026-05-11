@@ -93,15 +93,16 @@ app.add_middleware(
 )
 
 # ── Singletons ──
-router = TaskRouter()
 hrms = HRMSManager()
 payroll = PayrollManager(hrms)
+router = TaskRouter(hrms_manager=hrms)  # 注入 hrms 实例，避免循环导入
 dev_mgr = DevelopmentManager(hrms, router.emb, ai_provider=router.ai)
 
 _ALLOWED_EXT = {".pdf", ".txt", ".docx"}
 
 
 def _validate_ext(filename: str) -> str:
+    """Validate file extension is supported."""
     ext = os.path.splitext(filename)[1].lower()
     if ext not in _ALLOWED_EXT:
         raise HTTPException(400, f"Unsupported file type: {ext}. Allowed: {_ALLOWED_EXT}")
@@ -109,6 +110,7 @@ def _validate_ext(filename: str) -> str:
 
 
 def _save_upload(file_content: bytes, filename: str) -> str:
+    """Save uploaded file to disk and return the path."""
     path = os.path.join(config.UPLOAD_DIR, filename)
     with open(path, "wb") as f:
         f.write(file_content)
@@ -116,6 +118,7 @@ def _save_upload(file_content: bytes, filename: str) -> str:
 
 
 def _cleanup(path: str):
+    """Safely remove a temporary file."""
     try:
         if path and os.path.exists(path):
             os.remove(path)
@@ -124,10 +127,12 @@ def _cleanup(path: str):
 
 
 def _ok(data=None, message: str = "OK") -> Dict:
+    """Standard success response."""
     return {"success": True, "data": data, "message": message}
 
 
 def _err(message: str, data=None) -> Dict:
+    """Standard error response."""
     return {"success": False, "data": data, "message": message}
 
 
@@ -137,6 +142,7 @@ def _err(message: str, data=None) -> Dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
+    """Serve the main frontend HTML file."""
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             return f.read()
@@ -150,6 +156,7 @@ async def get_index():
 
 @app.post("/api/upload_culture")
 async def upload_culture(file: UploadFile = File(...)):
+    """Upload and index a company culture document (handbook, values, policy)."""
     _validate_ext(file.filename)
     content = await file.read()
     path = _save_upload(content, file.filename)
@@ -166,6 +173,7 @@ async def upload_culture(file: UploadFile = File(...)):
 
 @app.post("/api/screen_cvs")
 async def screen_cvs(jd: str = Form(...), files: List[UploadFile] = File(...)):
+    """Batch screen CVs against a job description with default weights."""
     if not jd.strip():
         raise HTTPException(400, "Job description cannot be empty.")
     if not files:
@@ -197,6 +205,7 @@ async def screen_cvs_with_weights(
     files: List[UploadFile] = File(...),
     weights_json: str = Form("{}"),
 ):
+    """Batch screen CVs with custom scoring weights."""
     if not jd.strip():
         raise HTTPException(400, "Job description cannot be empty.")
     if not files:
@@ -225,140 +234,48 @@ async def get_screening_history(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
+    """Get paginated CV screening history."""
     return router.get_screening_history(limit=limit, offset=offset)
 
 
 @app.get("/api/screening_history/{screening_id}")
 async def get_screening_detail(screening_id: str):
+    """Get full detail of a specific screening record."""
     detail = router.get_screening_detail(screening_id)
     if not detail:
         raise HTTPException(404, "Screening record not found.")
     return detail
 
+
 # ══════════════════════════════════════════════════════════
-# AI: Employee Chat (NEW - RAG-based employee-specific AI chat)
+# AI: Employee Chat (RAG-based employee-specific AI chat)
 # ══════════════════════════════════════════════════════════
 
 @app.post("/api/employee_chat")
 async def employee_chat(
     employee_id: str = Form(...),
     query: str = Form(...),
+    conversation_history: str = Form(""),
 ):
+    """
+    AI-powered chat about a specific employee using RAG.
+    
+    Gathers context from HRMS records, attendance, leave requests,
+    and embedded documents (CV/profile) to provide informed answers.
+    """
     if not employee_id.strip():
         raise HTTPException(400, "Employee ID cannot be empty.")
     if not query.strip():
         raise HTTPException(400, "Query cannot be empty.")
     
-    # Verify employee exists
-    emp = hrms.get_employee(employee_id)
-    if not emp:
-        raise HTTPException(404, f"Employee {employee_id} not found.")
+    # 验证员工存在
+    if not hrms.get_employee(employee_id):
+        raise HTTPException(404, f"Employee '{employee_id}' not found.")
     
     try:
-        # Gather all employee data for RAG context
-        context_parts = []
-        
-        # 1. HRMS data
-        context_parts.append(f"=== HRMS DATA ===")
-        context_parts.append(f"Name: {emp.get('full_name', 'N/A')}")
-        context_parts.append(f"Position: {emp.get('position', 'N/A')}")
-        context_parts.append(f"Department: {emp.get('department', 'N/A')}")
-        context_parts.append(f"Status: {emp.get('status', 'N/A')}")
-        context_parts.append(f"Hire Date: {emp.get('hire_date', 'N/A')}")
-        context_parts.append(f"Employment Type: {emp.get('employment_type', 'N/A')}")
-        context_parts.append(f"Notes: {emp.get('notes', 'N/A')}")
-        
-        # 2. Salary info
-        salary = emp.get('salary', {})
-        context_parts.append(f"\n=== SALARY ===")
-        context_parts.append(f"Base: {salary.get('base', 0)} {salary.get('currency', 'HKD')}")
-        context_parts.append(f"Bonus: {salary.get('bonus', 0)}")
-        
-        # 3. Leave balance
-        leave = emp.get('leave', {})
-        context_parts.append(f"\n=== LEAVE BALANCE ===")
-        for lt in ['annual_leave', 'sick_leave', 'personal_leave']:
-            total = leave.get(f'{lt}_total', 0)
-            used = leave.get(f'{lt}_used', 0)
-            context_parts.append(f"{lt}: {used}/{total} (remaining: {total - used})")
-        
-        # 4. Emergency contact
-        ec = emp.get('emergency_contact', {})
-        if ec.get('name'):
-            context_parts.append(f"\n=== EMERGENCY CONTACT ===")
-            context_parts.append(f"Name: {ec.get('name', 'N/A')}")
-            context_parts.append(f"Relationship: {ec.get('relationship', 'N/A')}")
-            context_parts.append(f"Phone: {ec.get('phone', 'N/A')}")
-        
-        # 5. KPI data
-        kpis = emp.get('kpi', [])
-        if kpis:
-            context_parts.append(f"\n=== KPI HISTORY ===")
-            for kpi in kpis:
-                context_parts.append(
-                    f"Period: {kpi.get('period', 'N/A')}, "
-                    f"Score: {kpi.get('score', 0)}, "
-                    f"Rating: {kpi.get('rating', 'N/A')}, "
-                    f"Comments: {kpi.get('comments', 'N/A')}"
-                )
-        
-        # 6. Attendance (current month)
-        now = datetime.now()
-        attendance_records = hrms.get_monthly_attendance(employee_id, now.year, now.month)
-        if attendance_records:
-            context_parts.append(f"\n=== ATTENDANCE (Current Month) ===")
-            for rec in attendance_records[-10:]:  # Last 10 records
-                context_parts.append(
-                    f"Date: {rec.get('date', 'N/A')}, "
-                    f"Check-in: {rec.get('check_in', 'N/A')}, "
-                    f"Check-out: {rec.get('check_out', 'N/A')}, "
-                    f"Status: {rec.get('status', 'N/A')}"
-                )
-        
-        # 7. Leave requests
-        leave_requests = hrms.get_all_leave_requests(employee_id=employee_id)
-        if leave_requests:
-            context_parts.append(f"\n=== LEAVE REQUESTS ===")
-            for lr in leave_requests[-5:]:  # Last 5 requests
-                context_parts.append(
-                    f"ID: {lr.get('request_id', 'N/A')}, "
-                    f"Type: {lr.get('leave_type', 'N/A')}, "
-                    f"Dates: {lr.get('start_date', 'N/A')} to {lr.get('end_date', 'N/A')}, "
-                    f"Status: {lr.get('status', 'N/A')}"
-                )
-        
-        # 8. Embedded documents (CV/Profile)
-        if router.emb:
-            for doc_type in ["cv", "profile"]:
-                try:
-                    db = router.emb.load_employee_db(employee_id, doc_type)
-                    docs = db.similarity_search(query, k=3)
-                    if docs:
-                        context_parts.append(f"\n=== {doc_type.upper()} DOCUMENT (Relevant Excerpts) ===")
-                        for i, doc in enumerate(docs):
-                            context_parts.append(f"[Excerpt {i+1}]: {doc.page_content[:500]}")
-                except FileNotFoundError:
-                    context_parts.append(f"\n=== {doc_type.upper()} DOCUMENT: Not found ===")
-                except Exception as exc:
-                    context_parts.append(f"\n=== {doc_type.upper()} DOCUMENT: Error loading ({exc}) ===")
-        
-        
-        combined_context = "\n".join(context_parts)
-        
-        # Call AI with RAG context
-        result = router.ai.chat(
-            query=query,
-            context=combined_context,
-            feature="employee_chat"
-        )
-        
-        return {
-            "success": True,
-            "employee_id": employee_id,
-            "query": query,
-            "response": result if isinstance(result, str) else result.get("response", "No response generated"),
-            "context_used": True,
-        }
+        # 委托给 TaskRouter 处理 RAG 上下文构建和 AI 调用
+        result = await router.employee_chat(employee_id, query)
+        return result
         
     except Exception as exc:
         logger.error(f"Employee chat failed for {employee_id}: {exc}", exc_info=True)
@@ -375,6 +292,7 @@ async def upload_employee(
     doc_type: str = Form("profile"),
     file: UploadFile = File(...),
 ):
+    """Upload and index an employee document (CV, profile, review, etc.)."""
     if not employee_id.strip():
         raise HTTPException(400, "Employee ID cannot be empty.")
     _validate_ext(file.filename)
@@ -394,7 +312,7 @@ async def upload_employee(
         if "error" in result:
             raise HTTPException(500, result["error"])
 
-        # Module 6: Auto-classify document
+        # Auto-classify document (optional enhancement)
         classification = None
         try:
             from langchain_community.document_loaders import (
@@ -430,6 +348,7 @@ async def upload_employee(
     finally:
         _cleanup(path)
 
+
 # ══════════════════════════════════════════════════════════
 # AI: Interview assistant (Module 4)
 # ══════════════════════════════════════════════════════════
@@ -440,7 +359,7 @@ async def interview_assist(
     jd: str = Form(...),
     competency: str = Form(""),
 ):
-    """Analyse an interview transcript and return AI evaluation scores."""
+    """Analyse an interview transcript and return AI evaluation scores across 7 dimensions."""
     if not transcript.strip():
         raise HTTPException(400, "Transcript cannot be empty.")
     if not jd.strip():
@@ -461,11 +380,13 @@ async def list_employees(
     department: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
 ):
+    """List all employees with optional department and status filters."""
     return {"employees": hrms.list_employees(department=department, status=status)}
 
 
 @app.post("/api/hrms/employees")
 async def create_employee(payload: Dict[str, Any]):
+    """Create a new employee record."""
     employee_id = payload.get("employee_id", "").strip()
     if not employee_id:
         raise HTTPException(400, "employee_id is required.")
@@ -476,8 +397,11 @@ async def create_employee(payload: Dict[str, Any]):
         raise HTTPException(409, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
 @app.get("/api/hrms/employees/{employee_id}")
 async def get_employee(employee_id: str):
+    """Get a single employee by ID."""
     record = hrms.get_employee(employee_id)
     if not record:
         raise HTTPException(404, f"Employee {employee_id} not found.")
@@ -486,6 +410,7 @@ async def get_employee(employee_id: str):
 
 @app.put("/api/hrms/employees/{employee_id}")
 async def update_employee(employee_id: str, payload: Dict[str, Any]):
+    """Update an existing employee record."""
     try:
         record = hrms.update_employee(employee_id, payload)
         return {"success": True, "employee": record}
@@ -497,6 +422,7 @@ async def update_employee(employee_id: str, payload: Dict[str, Any]):
 
 @app.delete("/api/hrms/employees/{employee_id}")
 async def delete_employee(employee_id: str):
+    """Delete an employee record."""
     if not hrms.delete_employee(employee_id):
         raise HTTPException(404, f"Employee {employee_id} not found.")
     return {"success": True, "message": f"Employee {employee_id} deleted."}
@@ -504,6 +430,7 @@ async def delete_employee(employee_id: str):
 
 @app.post("/api/hrms/employees/{employee_id}/kpi")
 async def add_kpi(employee_id: str, payload: Dict[str, Any]):
+    """Add a KPI entry for an employee."""
     try:
         record = hrms.add_kpi_entry(employee_id, payload)
         return {"success": True, "kpi": record["kpi"]}
@@ -515,6 +442,7 @@ async def add_kpi(employee_id: str, payload: Dict[str, Any]):
 
 @app.post("/api/hrms/employees/{employee_id}/leave")
 async def apply_leave(employee_id: str, payload: Dict[str, Any]):
+    """Directly deduct leave balance (legacy endpoint)."""
     leave_type = payload.get("leave_type", "")
     days = payload.get("days", 0)
     if not leave_type:
@@ -538,6 +466,12 @@ async def edit_employee_profile(
     content: str = Form(...),
     doc_type: str = Form("profile"),
 ):
+    """
+    Create/update employee profile document and embed it.
+    
+    Takes raw text content, saves it as a .txt file, and embeds
+    it into the employee's vector DB for RAG-powered queries.
+    """
     if not employee_id.strip():
         raise HTTPException(400, "Employee ID required")
     if not content.strip():
@@ -571,7 +505,7 @@ async def edit_employee_profile(
             "is_new": result.get("is_new", True),
         }
     finally:
-        # FIX #4: Always clean up the temporary file (was `finally: pass`)
+        # FIX #4: Always clean up the temporary file
         _cleanup(file_path)
 
 
@@ -581,16 +515,19 @@ async def edit_employee_profile(
 
 @app.get("/api/hrms/departments/summary")
 async def department_summary():
+    """Get department headcount and salary summary."""
     return hrms.get_department_summary()
 
 
 @app.get("/api/hrms/departments/tree")
 async def department_tree():
+    """Get department hierarchy tree with employee assignments."""
     return {"departments": hrms.get_department_tree()}
 
 
 @app.put("/api/hrms/employees/{employee_id}/department")
 async def update_employee_department(employee_id: str, payload: Dict[str, Any]):
+    """Update an employee's department assignment."""
     department = payload.get("department", "").strip()
     if not department:
         raise HTTPException(400, "department is required.")
@@ -607,9 +544,15 @@ async def update_employee_department(employee_id: str, payload: Dict[str, Any]):
 
 @app.post("/api/attendance/checkin")
 async def check_in(payload: Dict[str, Any]):
+    """Record employee check-in. Auto-detects late arrival (after 09:30)."""
     employee_id = payload.get("employee_id", "").strip()
     if not employee_id:
         raise HTTPException(400, "employee_id is required.")
+    
+    # 校验员工是否存在
+    if not hrms.get_employee(employee_id):
+        raise HTTPException(404, f"Employee '{employee_id}' not found.")
+    
     try:
         record = hrms.record_check_in(employee_id)
         return _ok(
@@ -617,7 +560,7 @@ async def check_in(payload: Dict[str, Any]):
             f"Check-in recorded for {employee_id} at "
             f"{record['check_in']} ({record['status']})",
         )
-    except (KeyError, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
@@ -625,13 +568,19 @@ async def check_in(payload: Dict[str, Any]):
 
 @app.post("/api/attendance/checkout")
 async def check_out(payload: Dict[str, Any]):
+    """Record employee check-out and compute work hours."""
     employee_id = payload.get("employee_id", "").strip()
     if not employee_id:
         raise HTTPException(400, "employee_id is required.")
+    
+    # 校验员工是否存在
+    if not hrms.get_employee(employee_id):
+        raise HTTPException(404, f"Employee '{employee_id}' not found.")
+    
     try:
         record = hrms.record_check_out(employee_id)
         return _ok(record, f"Check-out recorded. Work hours: {record['work_hours']}h")
-    except (KeyError, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
@@ -643,23 +592,31 @@ async def monthly_attendance(
     year: int = Query(...),
     month: int = Query(...),
 ):
+    """Get all attendance records for an employee in a given month."""
     records = hrms.get_monthly_attendance(employee_id, year, month)
     return _ok(records, f"{len(records)} records found for {year}-{month:02d}")
 
 
 @app.get("/api/attendance/daily")
 async def daily_summary(date_str: str = Query(..., alias="date")):
+    """Get attendance summary for all employees on a given date."""
     summary = hrms.get_daily_attendance_summary(date_str)
     return _ok(summary)
 
 
 @app.post("/api/attendance/absent")
 async def mark_absent(payload: Dict[str, Any]):
+    """Mark an employee as absent on a specific date."""
     employee_id = payload.get("employee_id", "").strip()
     date_str = payload.get("date", "").strip()
     reason = payload.get("reason", "")
     if not employee_id or not date_str:
         raise HTTPException(400, "employee_id and date are required.")
+    
+    # 校验员工是否存在
+    if not hrms.get_employee(employee_id):
+        raise HTTPException(404, f"Employee '{employee_id}' not found.")
+    
     try:
         record = hrms.mark_absent(employee_id, date_str, reason)
         return _ok(record)
@@ -673,6 +630,7 @@ async def mark_absent(payload: Dict[str, Any]):
 
 @app.post("/api/leave/request")
 async def submit_leave_request(payload: Dict[str, Any]):
+    """Submit a leave request for approval."""
     try:
         req = hrms.submit_leave_request(
             payload.get("employee_id", ""),
@@ -690,6 +648,7 @@ async def submit_leave_request(payload: Dict[str, Any]):
 
 @app.post("/api/leave/approve/{request_id}")
 async def approve_leave(request_id: str, payload: Dict[str, Any]):
+    """Approve a pending leave request."""
     approver_id = payload.get("approver_id", "system")
     try:
         req = hrms.approve_leave_request(request_id, approver_id)
@@ -700,6 +659,7 @@ async def approve_leave(request_id: str, payload: Dict[str, Any]):
 
 @app.post("/api/leave/reject/{request_id}")
 async def reject_leave(request_id: str, payload: Dict[str, Any]):
+    """Reject a pending leave request."""
     approver_id = payload.get("approver_id", "system")
     reason = payload.get("reason", "")
     try:
@@ -711,18 +671,21 @@ async def reject_leave(request_id: str, payload: Dict[str, Any]):
 
 @app.get("/api/leave/pending")
 async def get_pending_leave(department: Optional[str] = Query(None)):
+    """Get all pending leave requests, optionally filtered by department."""
     requests = hrms.get_pending_leave_requests(department=department)
     return _ok(requests, f"{len(requests)} pending leave requests.")
 
 
 @app.get("/api/leave/all")
 async def get_all_leave(employee_id: Optional[str] = Query(None)):
+    """Get all leave requests, optionally filtered by employee."""
     requests = hrms.get_all_leave_requests(employee_id=employee_id)
     return _ok(requests, f"{len(requests)} leave requests.")
 
 
 @app.get("/api/leave/summary/{employee_id}")
 async def leave_summary(employee_id: str):
+    """Get leave balance summary for an employee."""
     try:
         summary = hrms.get_employee_leave_summary(employee_id)
         return _ok(summary)
@@ -740,6 +703,7 @@ async def get_payroll(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
 ):
+    """Calculate monthly salary breakdown for an employee."""
     try:
         result = payroll.calculate_monthly_salary(employee_id, year, month)
         return _ok(result)
@@ -755,6 +719,7 @@ async def get_payslip(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
 ):
+    """Generate a formatted payslip for an employee."""
     try:
         slip = payroll.generate_payslip(employee_id, year, month)
         return slip
@@ -768,6 +733,7 @@ async def dept_payroll(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
 ):
+    """Calculate aggregated payroll for an entire department."""
     try:
         result = payroll.calculate_department_payroll(department, year, month)
         return _ok(result)
@@ -777,6 +743,7 @@ async def dept_payroll(
 
 @app.get("/api/payroll/{employee_id}/adjustment")
 async def salary_adjustment(employee_id: str):
+    """Suggest annual salary adjustment based on KPI and tenure."""
     try:
         result = payroll.suggest_annual_adjustment(employee_id)
         return _ok(result)
@@ -790,6 +757,7 @@ async def salary_adjustment(employee_id: str):
 
 @app.get("/api/employees/{employee_id}/skills")
 async def get_skills(employee_id: str):
+    """Extract skills for an employee from HRMS data and embedded documents."""
     try:
         skills = dev_mgr.extract_skills_from_employee(employee_id)
         return _ok(skills, f"{len(skills)} skills identified.")
@@ -799,13 +767,20 @@ async def get_skills(employee_id: str):
         raise HTTPException(500, str(exc))
 
 
-
 # ══════════════════════════════════════════════════════════
 # MODULE 8: Enhanced Dashboard
 # ══════════════════════════════════════════════════════════
 
 @app.get("/api/dashboard")
 async def dashboard():
+    """
+    Enhanced dashboard with KPIs:
+    - Employee stats (total, active, on leave, terminated)
+    - Attendance today
+    - Pending approvals
+    - Payroll estimate for current month
+    - Recent CV screening history
+    """
     employees = hrms.list_employees()
     dept_summary = hrms.get_department_summary()
     recent_screenings = router.get_screening_history(limit=5, offset=0)
@@ -876,6 +851,7 @@ async def dashboard():
 
 @app.get("/api/health")
 async def health():
+    """Health check endpoint."""
     return {"status": "healthy", "service": "AI-HR Bridge Platform v4.0"}
 
 
