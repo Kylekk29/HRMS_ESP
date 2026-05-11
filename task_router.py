@@ -4,11 +4,12 @@ task_router.py  — AI-HR Bridge Platform v4.0
 Orchestrates HR workflows:
   1. Company-culture document upload & indexing
   2. Batch CV screening (embed all → single AI comparison call)
-  3. Employee risk / termination analysis
-  4. Interview transcript analysis (NEW)
+  3. Employee chat (RAG-powered Q&A)
+  4. Interview transcript analysis
 
 v4.0 additions:
   - analyze_interview(): AI-powered interview evaluation
+  - employee_chat(): RAG-based employee-specific AI chat
   - Screening history CRUD (unchanged)
 """
 import logging
@@ -34,14 +35,22 @@ DEFAULT_WEIGHTS = {
 
 
 class TaskRouter:
+    """
+    Orchestrates HR AI workflows.
+    
+    Args:
+        hrms_manager: HRMSManager instance for employee data access.
+                      Injected to avoid circular imports.
+    """
 
-    def __init__(self):
+    def __init__(self, hrms_manager=None):
         logger.info("=" * 60)
         logger.info("Initializing TaskRouter...")
         start_time = time.time()
 
         self.ai = AIModelProvider()
         self.emb = EmbeddingManager()
+        self.hrms = hrms_manager  # 注入的 hrms 实例，避免循环导入
         self._culture_db_id: str | None = None
 
         os.makedirs(config.SCREENING_HISTORY_DIR, exist_ok=True)
@@ -54,6 +63,7 @@ class TaskRouter:
     # ──────────────────────────────────────────────
 
     async def upload_company_culture(self, file_path: str, file_name: str) -> Dict:
+        """Upload and index a company culture document with version control."""
         logger.info("=" * 60)
         logger.info(f"📄 UPLOADING COMPANY CULTURE: {file_name}")
         start_time = time.time()
@@ -92,12 +102,24 @@ class TaskRouter:
         cv_files: List[Dict],
         weights: Optional[Dict[str, int]] = None,
     ) -> Dict:
+        """
+        Screen multiple CVs against a job description.
+        
+        Args:
+            jd: Job description text
+            cv_files: List of {"file_path": str, "file_name": str}
+            weights: Optional custom scoring weights
+            
+        Returns:
+            Screening results with individual candidate scores and analysis
+        """
         logger.info("=" * 60)
         logger.info("🔍 BATCH CV SCREENING STARTED")
         logger.info(f"  Files: {len(cv_files)}, JD length: {len(jd)}")
 
         overall_start = time.time()
 
+        # Normalize weights to sum to 100
         if weights is None:
             weights = DEFAULT_WEIGHTS.copy()
         else:
@@ -112,17 +134,21 @@ class TaskRouter:
 
         logger.info(f"  Weights: {weights}")
 
+        # Enforce batch size limit
         if len(cv_files) > config.MAX_CV_BATCH_SIZE:
             cv_files = cv_files[:config.MAX_CV_BATCH_SIZE]
 
         errors: List[Dict] = []
 
+        # Step 1: Embed all CVs
         logger.info("STEP 1: Embedding CVs...")
         embed_results = self.emb.embed_cv_batch(cv_files)
 
+        # Step 2: Get culture context
         logger.info("STEP 2: Culture context...")
         culture_ctx = self._get_culture_context(jd)
 
+        # Step 3: Build candidate contexts from vector DB
         logger.info("STEP 3: Building contexts...")
         candidate_sections: List[str] = []
         successful_meta: List[Dict] = []
@@ -160,6 +186,7 @@ class TaskRouter:
                 "message": "All CV embeddings failed.",
             }
 
+        # Step 4: AI screening with weights
         logger.info("STEP 4: AI screening with weights...")
         all_candidates_ctx = "\n\n".join(candidate_sections)
 
@@ -184,6 +211,7 @@ class TaskRouter:
             weights_text=weights_text_full,
         )
 
+        # Extract results from AI response
         if isinstance(ai_raw, dict) and "results" in ai_raw:
             results_list = ai_raw["results"]
         elif isinstance(ai_raw, list):
@@ -191,6 +219,7 @@ class TaskRouter:
         else:
             results_list = []
 
+        # Attach metadata to each result
         for i, res in enumerate(results_list):
             if i < len(successful_meta):
                 res.setdefault("candidate_file", successful_meta[i]["file_name"])
@@ -201,6 +230,7 @@ class TaskRouter:
                     "version": successful_meta[i].get("version_number"),
                 }
 
+        # Save screening history
         screening_record = {
             "screening_id": f"SCR_{datetime.now().strftime('%Y%m%d%H%M%S')}_{os.urandom(3).hex()}",
             "timestamp": datetime.now().isoformat(),
@@ -237,6 +267,7 @@ class TaskRouter:
     # ──────────────────────────────────────────────
 
     def _save_screening_history(self, record: Dict) -> None:
+        """Save a screening record to history file (max 100 records)."""
         history = self._load_screening_history()
         history.insert(0, record)
         history = history[:100]
@@ -244,12 +275,14 @@ class TaskRouter:
             json.dump(history, f, indent=2, ensure_ascii=False)
 
     def _load_screening_history(self) -> List[Dict]:
+        """Load all screening history records."""
         if os.path.exists(config.SCREENING_HISTORY_FILE):
             with open(config.SCREENING_HISTORY_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         return []
 
     def get_screening_history(self, limit: int = 20, offset: int = 0) -> Dict:
+        """Get paginated screening history summaries."""
         history = self._load_screening_history()
         total = len(history)
         page = history[offset:offset + limit]
@@ -267,6 +300,7 @@ class TaskRouter:
         return {"total": total, "offset": offset, "limit": limit, "screenings": summaries}
 
     def get_screening_detail(self, screening_id: str) -> Optional[Dict]:
+        """Get full detail of a specific screening record."""
         history = self._load_screening_history()
         for h in history:
             if h["screening_id"] == screening_id:
@@ -274,49 +308,115 @@ class TaskRouter:
         return None
 
     # ──────────────────────────────────────────────
-    # 3. Employee chat
+    # 3. Employee chat (RAG-powered)
     # ──────────────────────────────────────────────
 
     async def employee_chat(self, employee_id: str, query: str) -> Dict:
-        """Enhanced chat with full RAG from all employee data sources."""
+        """
+        RAG-powered employee chat using all available data sources.
+        
+        Gathers context from:
+        - HRMS employee records (profile, KPI, leave, salary)
+        - Vector DB (embedded CV and profile documents)
+        - Attendance records (current month)
+        - Leave request history
+        
+        Args:
+            employee_id: Employee identifier
+            query: User's question about the employee
+            
+        Returns:
+            {"success": bool, "response": str, "rag_used": bool, "error": str|None}
+        """
         logger.info(f"👤 EMPLOYEE CHAT: {employee_id}")
+        logger.info(f"  Query: {query[:100]}...")
         
         try:
-            # Start building context from all available sources
+            # 使用注入的 hrms 实例获取员工数据
+            emp = self.hrms.get_employee(employee_id) if self.hrms else None
+            
+            if not emp:
+                return {
+                    "success": False,
+                    "error": f"Employee {employee_id} not found or HRMS unavailable",
+                    "response": None
+                }
+            
             context_parts = []
             
-            # Load HRMS data
-            from main_api import hrms as _hrms
-            emp = _hrms.get_employee(employee_id)
-            if emp:
-                context_parts.extend([
-                    f"Name: {emp.get('full_name', 'N/A')}",
-                    f"Position: {emp.get('position', 'N/A')}",
-                    f"Department: {emp.get('department', 'N/A')}",
-                    f"Status: {emp.get('status', 'N/A')}",
-                    f"Hire Date: {emp.get('hire_date', 'N/A')}",
-                    f"Notes: {emp.get('notes', 'N/A')}",
-                ])
-                
-                # KPI data
-                kpis = emp.get('kpi', [])
-                if kpis:
-                    context_parts.append("\nKPI History:")
-                    for kpi in kpis[-5:]:  # Last 5 KPI entries
+            # 1. HRMS basic data
+            context_parts.append("=== HRMS DATA ===")
+            context_parts.append(f"Name: {emp.get('full_name', 'N/A')}")
+            context_parts.append(f"Position: {emp.get('position', 'N/A')}")
+            context_parts.append(f"Department: {emp.get('department', 'N/A')}")
+            context_parts.append(f"Status: {emp.get('status', 'N/A')}")
+            context_parts.append(f"Hire Date: {emp.get('hire_date', 'N/A')}")
+            context_parts.append(f"Employment Type: {emp.get('employment_type', 'N/A')}")
+            context_parts.append(f"Notes: {emp.get('notes', 'N/A')}")
+            
+            # 2. Salary info
+            salary = emp.get('salary', {})
+            context_parts.append("\n=== SALARY ===")
+            context_parts.append(f"Base: {salary.get('base', 0)} {salary.get('currency', 'HKD')}")
+            context_parts.append(f"Bonus: {salary.get('bonus', 0)}")
+            
+            # 3. Leave balance
+            leave = emp.get('leave', {})
+            context_parts.append("\n=== LEAVE BALANCE ===")
+            for lt in ['annual_leave', 'sick_leave', 'personal_leave']:
+                total = leave.get(f'{lt}_total', 0)
+                used = leave.get(f'{lt}_used', 0)
+                context_parts.append(f"{lt}: {used}/{total} (remaining: {total - used})")
+            
+            # 4. Emergency contact
+            ec = emp.get('emergency_contact', {})
+            if ec.get('name'):
+                context_parts.append("\n=== EMERGENCY CONTACT ===")
+                context_parts.append(f"Name: {ec.get('name', 'N/A')}")
+                context_parts.append(f"Relationship: {ec.get('relationship', 'N/A')}")
+                context_parts.append(f"Phone: {ec.get('phone', 'N/A')}")
+            
+            # 5. KPI history
+            kpis = emp.get('kpi', [])
+            if kpis:
+                context_parts.append("\n=== KPI HISTORY ===")
+                for kpi in kpis[-5:]:  # Last 5 entries
+                    context_parts.append(
+                        f"Period: {kpi.get('period', 'N/A')}, "
+                        f"Score: {kpi.get('score', 0)}, "
+                        f"Rating: {kpi.get('rating', 'N/A')}, "
+                        f"Comments: {kpi.get('comments', 'N/A')}"
+                    )
+            
+            # 6. Attendance (current month)
+            if self.hrms:
+                now = datetime.now()
+                attendance_records = self.hrms.get_monthly_attendance(
+                    employee_id, now.year, now.month
+                )
+                if attendance_records:
+                    context_parts.append("\n=== ATTENDANCE (Current Month) ===")
+                    for rec in attendance_records[-10:]:  # Last 10 records
                         context_parts.append(
-                            f"  {kpi.get('period', '')}: Score={kpi.get('score', 0)}, "
-                            f"Rating={kpi.get('rating', '')}"
+                            f"Date: {rec.get('date', 'N/A')}, "
+                            f"Check-in: {rec.get('check_in', 'N/A')}, "
+                            f"Check-out: {rec.get('check_out', 'N/A')}, "
+                            f"Status: {rec.get('status', 'N/A')}"
                         )
                 
-                # Leave balance
-                leave = emp.get('leave', {})
-                context_parts.append("\nLeave Balance:")
-                for lt in ['annual_leave', 'sick_leave', 'personal_leave']:
-                    total = leave.get(f'{lt}_total', 0)
-                    used = leave.get(f'{lt}_used', 0)
-                    context_parts.append(f"  {lt}: {used}/{total} remaining")
+                # 7. Leave requests
+                leave_requests = self.hrms.get_all_leave_requests(employee_id=employee_id)
+                if leave_requests:
+                    context_parts.append("\n=== LEAVE REQUESTS ===")
+                    for lr in leave_requests[-5:]:  # Last 5 requests
+                        context_parts.append(
+                            f"ID: {lr.get('request_id', 'N/A')}, "
+                            f"Type: {lr.get('leave_type', 'N/A')}, "
+                            f"Dates: {lr.get('start_date', 'N/A')} to {lr.get('end_date', 'N/A')}, "
+                            f"Status: {lr.get('status', 'N/A')}"
+                        )
             
-            # Load from vector DB (CV/Profile)
+            # 8. Embedded documents (CV/Profile) from vector DB
             rag_used = False
             for doc_type in ["cv", "profile"]:
                 try:
@@ -324,7 +424,7 @@ class TaskRouter:
                     docs = db.similarity_search(query, k=3)
                     if docs:
                         rag_used = True
-                        context_parts.append(f"\n=== {doc_type.upper()} Document Excerpts ===")
+                        context_parts.append(f"\n=== {doc_type.upper()} DOCUMENT (Relevant Excerpts) ===")
                         for i, doc in enumerate(docs):
                             # Limit each excerpt to 500 chars
                             excerpt = doc.page_content[:500]
@@ -332,19 +432,20 @@ class TaskRouter:
                 except FileNotFoundError:
                     logger.info(f"  No {doc_type} DB for {employee_id}")
                 except Exception as exc:
-                    logger.warning(f"  Error loading {doc_type}: {exc}")
+                    logger.warning(f"  Error loading {doc_type} DB: {exc}")
             
             if not context_parts:
                 return {
-                    "success": False, 
-                    "error": f"No data available for {employee_id}", 
+                    "success": False,
+                    "error": f"No data available for {employee_id}",
                     "response": None
                 }
             
             context = "\n".join(context_parts)
             rag_status = "RAG enhanced" if rag_used else "HRMS only"
             logger.info(f"  Context built ({rag_status}): {len(context)} chars")
-            # Use the chat method for raw text response
+            
+            # Call AI with RAG context
             response = self.ai.chat(
                 query=query,
                 context=context,
@@ -352,18 +453,23 @@ class TaskRouter:
             )
             
             return {
-                "success": True, 
-                "employee_id": employee_id, 
+                "success": True,
+                "employee_id": employee_id,
                 "response": response,
                 "rag_used": rag_used,
                 "error": None
             }
             
         except Exception as exc:
-            logger.error(f"Employee chat failed: {exc}", exc_info=True)
-            return {"success": False, "error": str(exc), "response": None}
+            logger.error(f"Employee chat failed for {employee_id}: {exc}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "response": None
+            }
+
     # ──────────────────────────────────────────────
-    # 4. Interview analysis (NEW — Module 4)
+    # 4. Interview analysis (Module 4)
     # ──────────────────────────────────────────────
 
     async def analyze_interview(
@@ -374,16 +480,35 @@ class TaskRouter:
     ) -> Dict:
         """
         Evaluate an interview transcript using AI.
-        Returns dimension scores, strengths, weaknesses, red flags, and hiring recommendation.
+        
+        Returns dimension scores across 7 axes:
+        - Technical match, Communication, Logical thinking
+        - Adaptability, Teamwork, Culture fit, Learning agility
+        
+        Args:
+            transcript: Full interview transcript text
+            jd: Job description for reference
+            competency: Optional core competency requirements
+            
+        Returns:
+            {"success": bool, "analysis": dict|None, "error": str|None}
         """
         logger.info("🎤 INTERVIEW ANALYSIS")
         logger.info(f"  Transcript length: {len(transcript)} chars")
         logger.info(f"  JD length: {len(jd)} chars")
 
         if not transcript.strip():
-            return {"success": False, "error": "Interview transcript cannot be empty.", "analysis": None}
+            return {
+                "success": False,
+                "error": "Interview transcript cannot be empty.",
+                "analysis": None
+            }
         if not jd.strip():
-            return {"success": False, "error": "Job description cannot be empty.", "analysis": None}
+            return {
+                "success": False,
+                "error": "Job description cannot be empty.",
+                "analysis": None
+            }
 
         try:
             result = self.ai.cv_screening_ai(
@@ -393,20 +518,48 @@ class TaskRouter:
                 competency=competency or "Not specified",
             )
 
-            if isinstance(result, dict) and "error" not in result:
-                return {"success": True, "analysis": result, "error": None}
+            if isinstance(result, dict):
+                if "error" in result:
+                    return {
+                        "success": False,
+                        "error": result.get("error", "AI analysis failed"),
+                        "analysis": None
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "analysis": result,
+                        "error": None
+                    }
             else:
-                return {"success": False, "analysis": result, "error": result.get("error", "AI analysis failed")}
+                return {
+                    "success": False,
+                    "error": "Unexpected response format from AI",
+                    "analysis": None
+                }
 
         except Exception as exc:
             logger.error(f"  ❌ Interview analysis failed: {exc}", exc_info=True)
-            return {"success": False, "error": str(exc), "analysis": None}
+            return {
+                "success": False,
+                "error": str(exc),
+                "analysis": None
+            }
 
     # ──────────────────────────────────────────────
     # Helper: culture context
     # ──────────────────────────────────────────────
 
     def _get_culture_context(self, query: str) -> str:
+        """
+        Retrieve relevant company culture context from vector DB.
+        
+        Args:
+            query: Search query (typically the JD text)
+            
+        Returns:
+            Relevant culture text or fallback message
+        """
         if not self._culture_db_id:
             db_id = self.emb.version_mgr.get_current_db_id("company_culture")
             if db_id:
