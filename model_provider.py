@@ -243,26 +243,17 @@ class AIModelProvider:
     def chat(self, query: str, context: str = "", feature: str = None, **kwargs) -> str:
         """
         General purpose AI chat with raw text response (no JSON parsing).
-        
-        Args:
-            query: The user's question
-            context: Optional context to include
-            system_prompt: Optional custom system prompt
-            **kwargs: Additional parameters for the prompt template
-        
-        Returns:
-            Raw text response from the AI
+        始终返回字符串，错误时返回错误消息字符串。
         """
         logger.info("-" * 40)
         logger.info(f"💬 AI CHAT: {query[:50]}...")
         logger.info(f"  Context length: {len(context)} characters")
         
-        
         prompt_cfg = self.prompts.get(feature)
         if not prompt_cfg:
-            logger.error(f"Unknown feature: {feature}")
-            return {"error": f"Unknown feature: {feature}", "results": []}
-
+            error_msg = f"Unknown feature: {feature}"
+            logger.error(error_msg)
+            return f"Error: {error_msg}. Please check the feature name."  # 现在返回字符串
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", prompt_cfg["system_prompt"]),
@@ -280,5 +271,6 @@ class AIModelProvider:
             logger.info(f"  Response length: {len(response)} chars")
             return response
         except Exception as e:
-            logger.error(f"❌ Chat failed: {e}", exc_info=True)
+            error_msg = f"Chat failed: {str(e)}"
+            logger.error(f"❌ {error_msg}", exc_info=True)
             return f"I encountered an error: {str(e)}. Please try again."

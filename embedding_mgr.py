@@ -299,9 +299,16 @@ class EmbeddingManager:
         """
         Embed a document specifically for an employee.
         doc_type: "cv" | "profile" | "review" | "other"
-
-        DB path: ./vector_dbs/employees/<employee_id>/<doc_type>/<db_id>/
         """
+        # 修复：验证 employee_id 不为空
+        if not employee_id or not employee_id.strip():
+            raise ValueError("employee_id cannot be empty or whitespace")
+        
+        # 验证 doc_type 合法性
+        valid_doc_types = {"cv", "profile", "review", "other"}
+        if doc_type not in valid_doc_types:
+            raise ValueError(f"doc_type must be one of {valid_doc_types}, got '{doc_type}'")
+        
         logger.info("Embedding employee document:")
         logger.info(f"  Employee ID:   {employee_id}")
         logger.info(f"  Document type: {doc_type}")
@@ -316,7 +323,6 @@ class EmbeddingManager:
         return self.embed_file_with_versioning(
             file_path, file_id, employee_base, f"employee_{doc_type}"
         )
-
     # ──────────────────────────────────────────────
     # Batch CV embedding (up to MAX_CV_BATCH_SIZE)
     # ──────────────────────────────────────────────

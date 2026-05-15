@@ -353,6 +353,7 @@ class TaskRouter:
             context_parts.append(f"Hire Date: {emp.get('hire_date', 'N/A')}")
             context_parts.append(f"Employment Type: {emp.get('employment_type', 'N/A')}")
             context_parts.append(f"Notes: {emp.get('notes', 'N/A')}")
+            context_parts.append(f"Profile: {emp.get('profile_document', 'N/A')}")
             
             # 2. Salary info
             salary = emp.get('salary', {})

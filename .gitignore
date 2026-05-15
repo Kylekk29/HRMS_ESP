@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+logs/
+data/
+AImodels/
+backup_20260515/
+sample_data/
+.DS_Store
+Thumbs.db

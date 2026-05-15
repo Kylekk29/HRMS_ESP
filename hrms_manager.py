@@ -166,6 +166,7 @@ class HRMSManager:
             "kpi": payload.get("kpi", []),
             "emergency_contact": payload.get("emergency_contact", {"name": "", "relationship": "", "phone": ""}),
             "notes": payload.get("notes", ""),
+            "profile_document": payload.get("profile_document", ""),
             "created_at": _now(),
             "updated_at": _now(),
         }
@@ -192,7 +193,7 @@ class HRMSManager:
         record = self._data[employee_id]
 
         for field in ["full_name", "email", "phone", "department", "position",
-                      "employment_type", "hire_date", "status", "notes"]:
+                      "employment_type", "hire_date", "status", "notes", "profile_document"]:
             if field in payload:
                 record[field] = payload[field]
 
@@ -561,7 +562,7 @@ class HRMSManager:
 
 
     def approve_leave_request(self, request_id: str, approver_id: str) -> Dict:
-        """Approve a leave request. Now handles attendance conflicts properly."""
+        """Approve a leave request. Properly handles attendance conflicts."""
         lr_data = self._load_leave_requests()
         req = next((r for r in lr_data["requests"] if r["request_id"] == request_id), None)
         if not req:
@@ -578,21 +579,28 @@ class HRMSManager:
         conflicts = []
         for d in _daterange(req["start_date"], req["end_date"]):
             existing = next(
-                (r for r in att["records"] if r["employee_id"] == emp_id and r["date"] == d), None
+                (r for r in att["records"] 
+                if r["employee_id"] == emp_id and r["date"] == d), 
+                None
             )
             if existing:
-                # 如果有打卡记录，记录冲突但不覆盖
+                # 如果有打卡记录（check_in 或 check_out），记录冲突但保留原记录
                 if existing.get("check_in") or existing.get("check_out"):
-                    logger.warning(f"⚠️ Attendance conflict on {d}: employee {emp_id} has clock records")
+                    logger.warning(
+                        f"⚠️ Attendance conflict on {d}: employee {emp_id} has clock records"
+                    )
                     conflicts.append(d)
-                    # 保留原始记录，添加备注
-                    existing["notes"] = f"{existing.get('notes', '')} | Leave approved: {req['leave_type']}"
+                    # 保留原始记录，仅在备注中添加请假信息
+                    existing["notes"] = (
+                        f"{existing.get('notes', '')} | "
+                        f"Leave approved: {req['leave_type']} (request {request_id})"
+                    ).strip(" |")
                 else:
-                    # 只有空记录才更新为On Leave
+                    # 只有空记录才更新为 On Leave
                     existing["status"] = "On Leave"
                     existing["notes"] = f"Approved leave: {req['leave_type']}"
             else:
-                # 创建新的On Leave记录
+                # 创建新的 On Leave 记录
                 existing_day = [r for r in att["records"] if r["date"] == d]
                 seq = len(existing_day) + 1
                 att["records"].append({
@@ -613,11 +621,16 @@ class HRMSManager:
         req["approved_by"] = approver_id
         req["approved_at"] = _now()
         if conflicts:
-            req["conflicts_notes"] = f"Attendance conflicts on: {', '.join(conflicts)}"
+            req["conflicts_notes"] = (
+                f"Attendance conflicts on: {', '.join(conflicts)}. "
+                f"Original clock records preserved."
+            )
         self._save_leave_requests(lr_data)
         
-        logger.info(f"Leave request {request_id} approved" + 
-                (f" with {len(conflicts)} attendance conflicts" if conflicts else ""))
+        logger.info(
+            f"Leave request {request_id} approved"
+            + (f" with {len(conflicts)} attendance conflicts" if conflicts else "")
+        )
         return req
 
     def reject_leave_request(self, request_id: str, approver_id: str, reason: str) -> Dict:

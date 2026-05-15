@@ -59,9 +59,10 @@ class DevelopmentManager:
     def __init__(self, hrms_manager, embedding_manager=None, ai_provider=None):
         logger.info("Initializing DevelopmentManager...")
         self.hrms = hrms_manager
-        self.emb = embedding_manager
+        self.embedding_manager = embedding_manager  # 修复：统一命名
         self.ai = ai_provider 
-        if self.emb is None:
+        
+        if self.embedding_manager is None:
             logger.warning(
                 "⚠️  EmbeddingManager is None! Skill extraction will be "
                 "limited to HRMS data only."
@@ -72,7 +73,6 @@ class DevelopmentManager:
             )
         else:
             logger.info("✓ EmbeddingManager available for full skill extraction")
-
 
         os.makedirs(config.HRMS_DATA_DIR, exist_ok=True)
         logger.info("DevelopmentManager initialized.")
@@ -112,24 +112,25 @@ class DevelopmentManager:
                 deduped.append(item)
         return deduped
 
+    
     def extract_skills_from_employee(self, employee_id: str) -> List[Dict]:
         logger.info(f"Extracting skills for employee: {employee_id}")
-        emp = self.hrms.get_employee(employee_id)
+        emp = self.hrms.get_employee(employee_id)  # ✅ 正确的变量名
         if not emp:
             raise KeyError(f"Employee {employee_id} not found.")
 
         combined_text = " ".join([
             emp.get("position", ""),
             emp.get("notes", ""),
+            emp.get("profile_document", ""),
             " ".join(k.get("comments", "") for k in emp.get("kpi", [])),
         ])
-
         # Try vector DB search
         vector_db_used = False
-        if self.emb:
+        if self.embedding_manager:
             for doc_type in ("cv", "profile"):
                 try:
-                    db = self.emb.load_employee_db(employee_id, doc_type)
+                    db = self.embedding_manager.load_employee_db(employee_id, doc_type)
                     docs = db.similarity_search(
                         "skills experience or certifications",
                         k=5,

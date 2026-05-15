@@ -24,8 +24,8 @@ EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
 # ==================== AI Provider Settings ====================
 API_KEY = os.getenv("API_KEY", "")
 BASE_URL = os.getenv("BASE_URL", "https://api.deepseek.com")
-MODEL_NORMAL = "deepseek-chat"
-MODEL_REASONING = "deepseek-reasoner"
+MODEL_NORMAL = "deepseek-v4-flash"
+MODEL_REASONING = "deepseek-v4-pro"
 AI_PROVIDER = os.getenv("AI_PROVIDER", "deepseek")
 TIMEOUT = int(os.getenv("TIMEOUT", "120"))         
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "5"))
@@ -59,9 +59,18 @@ PAYROLL_RECORDS_DIR = os.path.join(DATA_ROOT, "payroll_data")
 
 # ==================== Ensure all directories exist ====================
 for dir_path in [
-    UPLOAD_DIR, DB_ROOT, CV_DB_DIR, CULTURE_DB_DIR, EMPLOYEE_DB_DIR,
-    ARCHIVE_DIR, METADATA_DIR, HRMS_DATA_DIR, LOG_DIR, SCREENING_HISTORY_DIR,
+    UPLOAD_DIR, 
+    DB_ROOT, 
+    CV_DB_DIR, 
+    CULTURE_DB_DIR, 
+    EMPLOYEE_DB_DIR,
+    ARCHIVE_DIR, 
+    METADATA_DIR, 
+    HRMS_DATA_DIR, 
+    LOG_DIR, 
+    SCREENING_HISTORY_DIR,
     PAYROLL_RECORDS_DIR,
+    NORMAL_DATA_DIR, 
 ]:
     os.makedirs(dir_path, exist_ok=True)
 
